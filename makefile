@@ -18,6 +18,14 @@ ${BIN_TARGET}:${OBJ}
 ${DIR_OBJ}/%.o:${DIR_SRC}/%.cpp
 	$(CC) -c $< -o $@ $(CFLAGS)
 
-.PHONY:clean
+.PHONY:clean test
 clean:
 	find ${DIR_OBJ} -name *.o -exec rm -rf {} \;
+	find ${DIR_BIN} -type f -exec rm -rf {} \;
+
+# CRSASection测试部分
+test:${DIR_BIN}/CRsa
+	${DIR_BIN}/CRsa
+
+${DIR_BIN}/CRsa:${DIR_SRC}/CRSASection.cpp
+	$(CC) $< -o $@ -std=c++11 -I${DIR_INC} -DTEST
