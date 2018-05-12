@@ -1,4 +1,4 @@
-#define SERVERPORT 2333
+#define SERVERPORT 6666
 #define BUFFERSIZE 128
 #define DESKEYLENGTH 8
 
@@ -59,6 +59,7 @@ void SecretChat(int nSock, char *pRemoteName, char *pKey)
     int nRet;
     while (1)
     {
+        //初始化相关变量
         FD_ZERO(&cHandleSet);
         FD_SET(nSock, &cHandleSet);
         FD_SET(0, &cHandleSet);
@@ -74,6 +75,7 @@ void SecretChat(int nSock, char *pRemoteName, char *pKey)
         {
             continue;
         }
+        //判断套接字是否有io操作
         if (FD_ISSET(nSock, &cHandleSet))
         {
             bzero(&strSocketBuffer, BUFFERSIZE);
@@ -86,6 +88,7 @@ void SecretChat(int nSock, char *pRemoteName, char *pKey)
             else
             {
                 int nLen = BUFFERSIZE;
+                //解密并显示到屏幕上
                 cDes.Decry(strSocketBuffer, BUFFERSIZE, strDecryBuffer, nLen, pKey, DESKEYLENGTH);
                 strDecryBuffer[BUFFERSIZE - 1] = 0;
                 if (strDecryBuffer[0] != 0 && strDecryBuffer[0] != '\n')
@@ -99,6 +102,7 @@ void SecretChat(int nSock, char *pRemoteName, char *pKey)
                 }
             }
         }
+        //判断标准输入是否有io操作
         if (FD_ISSET(0, &cHandleSet))
         {
             bzero(&strStdinBuffer, BUFFERSIZE);
@@ -110,6 +114,7 @@ void SecretChat(int nSock, char *pRemoteName, char *pKey)
                 }
             }
             int nLen = BUFFERSIZE;
+            //加密并发送数据
             cDes.Encry(strStdinBuffer, BUFFERSIZE, strEncryBuffer, nLen, pKey, DESKEYLENGTH);
             if (send(nSock, strEncryBuffer, BUFFERSIZE, 0) != BUFFERSIZE)
             {
@@ -145,6 +150,7 @@ int main(int argc, char *args[])
             perror("Socket");
             exit(errno);
         }
+        //初始化本地套接字
         bzero(&sDestAddr, sizeof(sDestAddr));
         sDestAddr.sin_family = AF_INET;
         sDestAddr.sin_port = htons(SERVERPORT);
@@ -158,8 +164,10 @@ int main(int argc, char *args[])
         else
         {
             printf("Connect Success!  \n");
+            //生成DES密钥
             GerenateDesKey(strDesKey);
             printf("Create DES key success\n");
+            //接收服务器出来的RSA公钥
             if (sizeof(cRsaPublicKey) == TotalRecv(nConnectSocket, (char *)&cRsaPublicKey,
                                                    sizeof(cRsaPublicKey), 0))
             {
@@ -170,14 +178,16 @@ int main(int argc, char *args[])
                 perror("Get RSA public key ");
                 exit(0);
             }
-            unsigned __int64 nEncryptDesKey[DESKEYLENGTH / 2];
+            //使用RSA公钥加密DES密钥
+            ULONG64 nEncryptDesKey[DESKEYLENGTH / 2];
             unsigned short *pDesKey = (unsigned short *)strDesKey;
             for (int i = 0; i < DESKEYLENGTH / 2; i++)
             {
                 nEncryptDesKey[i] = CRSASection::Encry(pDesKey[i], cRsaPublicKey);
             }
-            if (sizeof(unsigned __int64) * DESKEYLENGTH / 2 != send(nConnectSocket, (char *)nEncryptDesKey,
-                                                                    sizeof(unsigned __int64) * DESKEYLENGTH / 2, 0))
+            //发送加密后的DES密钥
+            if (sizeof(ULONG64) * DESKEYLENGTH / 2 != send(nConnectSocket, (char *)nEncryptDesKey,
+                                                                    sizeof(ULONG64) * DESKEYLENGTH / 2, 0))
             {
                 perror("Send DES key Error");
                 exit(0);
@@ -203,16 +213,20 @@ int main(int argc, char *args[])
             exit(1);
         }
 
+        //初始化本地 sockaddr_in 结构体
         bzero(&sLocalAddr, sizeof(sLocalAddr));
         sLocalAddr.sin_family = PF_INET;
         sLocalAddr.sin_port = htons(SERVERPORT);
         sLocalAddr.sin_addr.s_addr = INADDR_ANY;
 
+        //绑定本地套接字
         if (bind(nListenSocket, (struct sockaddr *)&sLocalAddr, sizeof(struct sockaddr)) == -1)
         {
             perror("bind");
             exit(1);
         }
+        
+        //开始监听
         if (listen(nListenSocket, 5) == -1)
         {
             perror("listen");
@@ -220,6 +234,7 @@ int main(int argc, char *args[])
         }
         printf("Listening...\n");
         nLength = sizeof(struct sockaddr);
+        //和客户端建立连接
         if ((nAcceptSocket = accept(nListenSocket, (struct sockaddr *)&sRemoteAddr, &nLength)) == -1)
         {
             perror("accept");
@@ -232,6 +247,7 @@ int main(int argc, char *args[])
                    ntohs(sRemoteAddr.sin_port), nAcceptSocket);
             CRSASection cRsaSection;
             cRsaPublicKey = cRsaSection.GetPublicKey();
+            //向客户端发送RSA公钥
             if (send(nAcceptSocket, (char *)(&cRsaPublicKey), sizeof(cRsaPublicKey), 0) != sizeof(cRsaPublicKey))
             {
                 perror("send");
@@ -241,9 +257,10 @@ int main(int argc, char *args[])
             {
                 printf("successful send the RSA public key. \n");
             }
-            unsigned __int64 nEncryptDesKey[DESKEYLENGTH / 2];
-            if (DESKEYLENGTH / 2 * sizeof(unsigned __int64) !=
-                TotalRecv(nAcceptSocket, (char *)nEncryptDesKey, DESKEYLENGTH / 2 * sizeof(unsigned __int64), 0))
+            //接收加密后的DES密钥并解密
+            ULONG64 nEncryptDesKey[DESKEYLENGTH / 2];
+            if (DESKEYLENGTH / 2 * sizeof(ULONG64) !=
+                TotalRecv(nAcceptSocket, (char *)nEncryptDesKey, DESKEYLENGTH / 2 * sizeof(ULONG64), 0))
             {
                 perror("TotalRecv DES key error");
                 exit(0);
