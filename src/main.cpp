@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 #include "CDesOperate.h"
 #include "CRSASection.h"
 
@@ -45,80 +46,85 @@ void GerenateDesKey(char *strDesKey)
         strDesKey[i] = rand() % 256;
 }
 
-//一个线程负责接收密文消息，解密并输出到屏幕
-void RecvPrint(int nSock, char *pRemoteName, char *pKey, CDesOperate &cDes)
-{
-    while (1)
-    {
-        bzero(&strSocketBuffer, BUFFERSIZE);
-        int nLength = 0;
-        nLength = TotalRecv(nSock, strSocketBuffer, BUFFERSIZE, 0);
-        if (nLength != BUFFERSIZE)
-        {
-            break;
-        }
-
-        int nLen = BUFFERSIZE;
-        cDes.Decry(strSocketBuffer, BUFFERSIZE, strDecryBuffer, nLen, pKey, 8);
-        strDecryBuffer[BUFFERSIZE - 1] = 0;
-        if (strDecryBuffer[0] != 0 && strDecryBuffer[0] != '\n')
-        {
-            printf("Receive message form <%s>: %s", pRemoteName, strDecryBuffer);
-            if (0 == memcmp("quit", strDecryBuffer, 4))
-            {
-                printf("Quit!\n");
-                close(nSock);
-                exit(0);
-            }
-        }
-    }
-}
-
-//另一个线程负责从标准输入读取消息，加密并发送到指定套接字
-void ReadSend(int nSock, char *pRemoteName, char *pKey, CDesOperate &cDes)
-{
-    while (1)
-    {
-        bzero(&strStdinBuffer, BUFFERSIZE);
-        while (strStdinBuffer[0] == 0)
-        {
-            if (fgets(strStdinBuffer, BUFFERSIZE, stdin) == NULL) //读取一行
-            {
-                continue;
-            }
-        }
-        int nLen = BUFFERSIZE;
-        cDes.Encry(strStdinBuffer, BUFFERSIZE, strEncryBuffer, nLen, pKey, 8);
-        if (send(nSock, strEncryBuffer, BUFFERSIZE, 0) != BUFFERSIZE)
-        {
-            perror("send");
-        }
-        else
-        {
-            if (0 == memcmp("quit", strStdinBuffer, 4))
-            {
-                printf("Quit!\n");
-                close(nSock);
-                exit(0);
-            }
-        }
-    }
-}
-
 void SecretChat(int nSock, char *pRemoteName, char *pKey)
 {
     CDesOperate cDes;
-    if (strlen(pKey) != 8)
+    if (strlen(pKey) != DESKEYLENGTH)
     {
         printf("Key length error");
         return;
     }
-
-    thread t1(ReadSend, nSock, pRemoteName, pKey, ref(cDes));
-    thread t2(RecvPrint, nSock, pRemoteName, pKey, ref(cDes));
-
-    t1.join();
-    t2.join();
+    fd_set cHandleSet;
+    timeval tv;
+    int nRet;
+    while (1)
+    {
+        FD_ZERO(&cHandleSet);
+        FD_SET(nSock, &cHandleSet);
+        FD_SET(0, &cHandleSet);
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+        nRet = select(nSock > 0 ? nSock + 1 : 1, &cHandleSet, NULL, NULL, &tv);
+        if (nRet < 0)
+        {
+            printf("Select ERROR!\n");
+            break;
+        }
+        if (0 == nRet)
+        {
+            continue;
+        }
+        if (FD_ISSET(nSock, &cHandleSet))
+        {
+            bzero(&strSocketBuffer, BUFFERSIZE);
+            int nLength = 0;
+            nLength = TotalRecv(nSock, strSocketBuffer, BUFFERSIZE, 0);
+            if (nLength != BUFFERSIZE)
+            {
+                break;
+            }
+            else
+            {
+                int nLen = BUFFERSIZE;
+                cDes.Decry(strSocketBuffer, BUFFERSIZE, strDecryBuffer, nLen, pKey, DESKEYLENGTH);
+                strDecryBuffer[BUFFERSIZE - 1] = 0;
+                if (strDecryBuffer[0] != 0 && strDecryBuffer[0] != '\n')
+                {
+                    printf("Receive message form<%s>: %s", pRemoteName, strDecryBuffer);
+                    if (0 == memcmp("quit", strDecryBuffer, 4))
+                    {
+                        printf("Quit!\n");
+                        break;
+                    }
+                }
+            }
+        }
+        if (FD_ISSET(0, &cHandleSet))
+        {
+            bzero(&strStdinBuffer, BUFFERSIZE);
+            while (strStdinBuffer[0] == 0)
+            {
+                if (fgets(strStdinBuffer, BUFFERSIZE, stdin) == NULL)
+                {
+                    continue;
+                }
+            }
+            int nLen = BUFFERSIZE;
+            cDes.Encry(strStdinBuffer, BUFFERSIZE, strEncryBuffer, nLen, pKey, DESKEYLENGTH);
+            if (send(nSock, strEncryBuffer, BUFFERSIZE, 0) != BUFFERSIZE)
+            {
+                perror("send");
+            }
+            else
+            {
+                if (0 == memcmp("quit", strStdinBuffer, 4))
+                {
+                    printf("Quit!\n");
+                    break;
+                }
+            }
+        }
+    }
 }
 
 int main(int argc, char *args[])
